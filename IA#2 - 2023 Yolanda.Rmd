@@ -1,0 +1,370 @@
+---
+title : "Yolanda Ojeda" 
+output: html_notebook
+---
+***
+<center>
+## Assignment #2: ARIMA Laboratory
+#### Due: Nov. 16 (Before Midnight)
+#### (40 points)
+</center>
+***
+
+
+### Part I.  Estimating Growth Potential and Capacity Utilization
+
+Suppose you are working for a firm in the restaurant business looking into the possibility of starting operations in Australia.  Your company has already narrowed its focus to five states: (i) Queensland, (ii) Victoria, (iii) New South Wales, (iv) Western Australia, and (v) the Australian Capital Territory. The decision of locations to start operations depend on two factors:
+
+(A) **Growth Potential:** More than the size of the market itself, the firm is interested in starting operations in locations with high growth rates.  The reasoning behind this decision is that it is easier to gain a foothold in a market that is growing than in one that is stagnant.
+
+(B) **Demand Variability:** There are two dimensions to demand variability. First, the change in mean demand from month to month over the year, i.e., the seasonality; and second, the volatility of the demand within each season. This is important as high levels of seasonality and high levels of uncertainty lead to reduced expected expected levels of capacity utilization and lower cash flows from operation.
+
+To aid your analysis, we include in the code box below an ETS analysis of the sales (turnover) of the aggregate restaurant industry in each state.  Please base your answers to question (1) and (2) on the results obtained by the analysis below.
+
+
+```{r warning=FALSE}
+library(fpp3)
+
+R <- aus_retail %>%
+  filter(Industry == "Cafes, restaurants and takeaway food services", 
+         State == "Australian Capital Territory"|
+           State == "Queensland" |
+           State == "Victoria" |
+           State == "Western Australia" |
+           State == "New South Wales" ) %>%
+  mutate(Sales = Turnover) %>%
+  select(State, Sales)
+
+R %>% autoplot(.var = Sales)
+
+m <- R %>% model(me = ETS(Sales))
+
+MC <- m %>% components() 
+
+MC %>% filter(State == "Australian Capital Territory") %>% filter(Month >= ym("2017 Dec"))
+MC %>% filter(State == "Queensland") %>% filter(Month >= ym("2017 Dec"))
+MC %>% filter(State == "New South Wales") %>% filter(Month >= ym("2017 Dec"))
+MC %>% filter(State == "Western Australia") %>% filter(Month >= ym("2017 Dec"))
+MC %>% filter(State == "Victoria") %>% filter(Month >= ym("2017 Dec"))
+
+MC %>% filter(State == "Australian Capital Territory") %>% autoplot()
+MC %>% filter(State == "Queensland") %>% autoplot()
+MC %>% filter(State == "New South Wales") %>% autoplot()
+MC %>% filter(State == "Western Australia") %>% autoplot()
+MC %>% filter(State == "Victoria") %>% autoplot()
+```
+
+1. What is the type of growth estimated by the models above for each state?
+
+The level component provides valuable insights into the state of the time series, but it does not directly measure the growth rate. Instead, it reflects the smoothed or estimated value of the series at each point in time, accounting for trend and seasonality.
+Australian Capital Territory 
+The slope component is consistently positive across all the months provided. It starts at 0.1524918 in December 2017 and slightly increases over time, reaching 0.1936661 by July 2018 and then slightly decreasing to 0.1849118 by September 2018 and decrease to 0.1681 at the end of the year. This indicates a positive growth trend, suggesting that the market in the ACT is expanding. The ACT shows a consistently positive and stable growth rate, which could be appealing for starting operations.
+Queensland
+The slope starts negative in December 2017, suggesting a declining trend. This negative trend deepens by February 2018, with the slope reaching -0.95774143. However, there is a turnaround starting from July 2018, with the slope turning positive, and by September 2018, it reaches 0.3216830, but later died down to negative again while it goes back up to positive in December. This reversal suggests that after a period of decline, the Queensland market began to grow in the middle of 2018. Considering the firms interest in high growth rates,  Queensland presents a recovery situation where the market is turning around from a decline to growth, which might also offer opportunities for a foothold if the growth trend continues.
+New South Wales 
+The slope component is positive across all months provided, starting at 3.447773 and increasing to 3.781169 then back to 3.46847. This suggests a consistently slow growing market with an increasing growth rate over the period shown.
+Western Australia
+The slope component is also positive for all months listed, beginning at 1.222950 and rising to 1.098961. While the slope indicates growth, the growth rate seems to decrease slightly and then increase again, indicating some variability but overall positive growth in the market.
+Victoria
+The slope component is positive as well, with an initial value of 2.053611 and rising to 2.577937. The growth rate is increasing, which suggests that Victoria is not only growing but also accelerating in terms of the sales.
+
+
+
+
+2. What are the values of the growth parameters (for each state) at the end of analysis period?
+
+Australian Capital Territory:
+Level: 65.41453
+Slope: 0.1681231
+
+Queensland:
+
+Level: 709.3075
+Slope: 0.11755319
+
+New South Wales:
+
+Level: 1332.941
+Slope: 3.468471
+
+Western Australia:
+
+Level: 483.5807
+Slope: 1.185602
+
+Victoria:
+
+Level: 946.4926
+Slope: 2.269460
+
+
+
+
+3. What is the growth rate (expressed as a percentage) of sales experienced by each state over the last twelve months? Calculate this as the percent change in the de-seasonalized level of demand estimated over the last twelve months.
+
+```{r}
+
+library(dplyr)
+library(lubridate)
+
+# Convert MC to a tibble
+MC_tibble <- as_tibble(MC)
+
+# Ensure MC_tibble is sorted correctly
+MC_tibble <- MC_tibble %>%
+  arrange(State, Month)
+
+# Filter for the last 12 months for each state and calculate growth
+annual_growth_rates <- MC_tibble %>%
+  filter(Month >= ym("2017 Dec")) %>%
+  group_by(State) %>%
+  # Ensure the group has at least 12 months of data
+  filter(n() >= 12) %>%
+  summarize(
+    begin_level = first(level),
+    end_level = last(level),
+    Growth_Rate = ((last(level) - first(level)) / first(level)) * 100
+  )
+
+# View the results
+print(annual_growth_rates)
+
+```
+
+4. One measure of operational risk is the effect of variability of mean demand from season to season on capacity utilization.  A simple way to estimate this is to calculate for each of the five states $D_{MAX} = \max_m D_m$ where the index $m$ takes values corresponding to the last twelve months. That is, $D_{MAX}$ is the maximum mean level of demand fitted for the last twelve months.  Then calculate the monthly metric of mean-forecast-based capacity utilization for each month as
+$$ U_m = \frac{D_m}{D_{MAX}} \times 100,$$
+then, using the monthly mean-based capacity utilization obtain the average mean-forecast-based utilization as $MU = mean(U_m)$ Report the utilization calculation for each of the five states. Summarize your analysis of sales growth potential and mean-variability with a table indicating the annual growth rate and annual average mean-base capacity utilization for each state. Management wants you to pick three of these five states to start operations base only on your analysis. explain your reasoning.  Are there any states that are dominated by other states based only on the growth vs. utilization metrics? Explain.
+```{r}
+library(dplyr)
+library(lubridate)
+
+# Filter the data for the last 12 months
+months_2018 <- MC_tibble %>% filter(Month >= ym("2017 Dec"))
+
+# Calculate maximum demand for each state
+max_demand <- months_2018 %>%
+  group_by(State) %>%
+  summarize(max_demand = max(Sales, na.rm = TRUE))
+
+# Calculate the capacity utilization for each month
+capacity_utilization <- months_2018 %>%
+  left_join(max_demand, by = "State") %>%
+  mutate(U_m = (Sales / max_demand) * 100)
+
+# Calculate the annual average capacity utilization for each state
+average_utilization <- capacity_utilization %>%
+  group_by(State) %>%
+  summarize(ave_utilization = mean(U_m, na.rm = TRUE))
+
+# Ensure annual_growth_rates is prepared and has a column named 'Growth_Rate'
+# Combine the growth rates and capacity utilization
+combined_rates <- annual_growth_rates %>%
+  select(State, Growth_Rate) %>%
+  inner_join(average_utilization, by = "State")
+
+# Print the combined data
+print(combined_rates)
+
+
+```
+Balanced Selection Criteria
+
+High Growth Potential: States with a high annual growth rate indicate a rapidly expanding market, offering opportunities for significant revenue gains.
+Stable Demand: High annual average utilization suggests consistent demand, which is essential for steady operations and reliable cash flows.
+
+State Analysis
+Australian Capital Territory (ACT):
+High Growth and High Utilization: ACT leads in both metrics, making it an attractive option for expansion. Its high growth rate suggests expanding opportunities, and its high utilization rate indicates a consistent demand.
+
+Victoria:
+Moderate Growth and Utilization: Victoria offers a balanced option with moderate growth and utilization rates. This balance suggests a stable market with room for growth.
+
+Western Australia (WA):
+Stability with Lower Growth: WA, while having lower growth, shows high utilization, indicating a stable and consistently demanding market. This makes it an attractive option for steady operations.
+
+Dominance Analysis
+The ACT’s superiority in both growth and utilization places it at a top position, dominating other states in terms of attractiveness for new operations. Trade-offs in Other States: Other states, like Victoria and WA, show trade-offs between growth and utilization. They do not exhibit clear dominance, suggesting a more nuanced decision based on strategic priorities.
+
+
+### Part II.  Estimating Downside Risk in Capacity Utilization
+
+After looking at your analysis and considering a number of additional factors not included in your analysis, management decided to narrow their prospecting to New South Wales, Western Australia and Victoria, and are asking for a more detailed analysis of the capacity utilization risk.  To estimate this risk, they are asking you to use the actual state-wide sales level as an index of what would be the company's sales, and assume that the actual system capacity will be built as the 95% quantile of the forecasted demand. Management is tasking you to estimate the average capacity utilization and the downside capacity utilization risk for each state. The following questions guide you through this analysis:
+
+5. Using the training and testing sets specified below, fit the best ETS and ARIMA models for the sales in each of these three states. Comment on the selection of a forecasting model for each state based on the validity, accuracy and information criteria for each model.
+
+```{r}
+library(dplyr)
+library(tsibble)
+library(fable)
+library(fabletools)
+library(lubridate)
+
+# Break into Training and Testing sets.
+S <- R %>% 
+  filter(State == "New South Wales" |
+         State == "Western Australia" |
+         State == "Victoria")
+
+TR <- S %>% 
+  filter(Month >= yearmonth("2000 Jan"),
+         Month <= yearmonth("2017 Dec"))
+TE <- S %>% 
+  filter(Month >= yearmonth("2018 Jan"))
+
+
+# Fit ETS and ARIMA models for each state in the training set
+m <- TR %>%
+  model(
+    ets = ETS(Sales),
+    arima = ARIMA(Sales)
+  )
+
+# Forecast using both models
+forecasts <- m %>%
+  forecast(h = "12 months")
+# Accuracy on the testing set
+accuracy <- accuracy(forecasts, TE)
+
+accuracy
+```
+
+New South Wales
+ARIMA Model: RMSE and MAE are relatively lower than ETS. The ACF1 value is moderately high, suggesting some autocorrelation in residuals.
+ETS Model: Higher RMSE and MAE compared to ARIMA. Lower ACF1 than ARIMA, indicating better handling of autocorrelation in residuals.
+Selection: ARIMA might be preferred for slightly better accuracy, but ETS shows better residual diagnostics. Further investigation using AIC or BIC would be beneficial.
+
+Victoria
+ARIMA Model: Lower RMSE and MAE compared to ETS, indicating better accuracy. ACF1 is moderately high.
+ETS Model: Higher RMSE and MAE, and higher ACF1, indicating less accurate forecasts and higher autocorrelation in residuals.
+Selection: ARIMA seems to be a better fit for Victoria based on accuracy and residual diagnostics.
+
+Western Australia
+ARIMA Model: Lower RMSE and MAE compared to ETS, but very high ACF1, indicating significant autocorrelation in residuals.
+ETS Model: Higher accuracy metrics but also a high ACF1 value.
+Selection: While ARIMA has better accuracy, the high ACF1 for both models is a concern. Investigating the underlying data and considering model refinements or alternative approaches might be necessary.
+
+For New South Wales, both ARIMA and ETS are close contenders, with ARIMA slightly leading in accuracy. For Victoria, ARIMA appears to be the better choice. In Western Australia, despite ARIMA's better accuracy, the high ACF1 values for both models raise concerns about their suitability.
+
+After listening to your arguments, and considering other subjective factors, your supervisor ask you to select the ARIMA model you obtained for the states of Western Australia and Victoria, but she prefers the ETS model for New South Whales. Use the above models to answer the following questions.
+
+
+6. Fit the actual models selected as the best ARIMA and ETS (see above) and re-fit these models using all the available data (i.e, the **S** data set), and then prepare a 12-month ahead forecast for each state. Report the forecast and the 80% and 90% confidence intervals for each state.
+
+```{r}
+# Fit the ARIMA model for Western Australia
+wa_ <- S %>%
+  filter(State == "Western Australia") %>%
+  model(ARIMA(Sales))
+
+# Fit the ARIMA model for Victoria
+vic_ <- S %>%
+  filter(State == "Victoria") %>%
+  model(ARIMA(Sales))
+
+# Fit the ETS model for New South Wales
+nsw_ <- S %>%
+  filter(State == "New South Wales") %>%
+  model(ETS(Sales))
+
+# Create 12-month ahead forecasts with 80% and 90% confidence intervals
+wa_forecast <- wa_ %>%
+  forecast(h = "12 months") %>%
+  hilo(level = c(80, 90))
+
+vic_forecast <- vic_ %>%
+  forecast(h = "12 months") %>%
+  hilo(level = c(80, 90))
+
+nsw_forecast <- nsw_ %>%
+  forecast(h = "12 months") %>%
+  hilo(level = c(80, 90))
+
+# Print the forecasts and confidence intervals
+print(wa_forecast)
+print(vic_forecast)
+print(nsw_forecast)
+```
+
+7. Using the forecasting models in Question 6, assume that your company will build capacity up to 95% of the maximum demand forecast for the following 12 months. That is, $CAP = \max_h D_{h,0.95}$, where $D_{h,0.95}$ is the maximum 95% quantile of the demand forecasts for the following 12 months. Then obtain the downside risk capacity utilization risk as 
+$$ DUR_h = \frac{D_{h,0.05}}{CAP} \times 100, $$
+where $D_{h,0.05}$ is the demand corresponding to the 5% quantile of the sales forecast, and then, using the monthly downside capacity utilization $DUR_h$ obtain the average downside utilization as $MDU = mean(DUR_h)$ Report the utilization calculation for each of the three states.
+
+```{r}
+wa_max_95 <- max(wa_forecast %>% mutate(Q95 = quantile(Sales, 0.95)) %>% pull(Q95), na.rm = TRUE)
+vic_max_95 <- max(vic_forecast %>% mutate(Q95 = quantile(Sales, 0.95)) %>% pull(Q95), na.rm = TRUE)
+nsw_max_95 <- max(nsw_forecast %>% mutate(Q95 = quantile(Sales, 0.95)) %>% pull(Q95), na.rm = TRUE)
+
+# Calculate the 5% quantile for each forecast
+wa_05 <- wa_forecast %>% mutate(Q5 = quantile(Sales, 0.05)) %>% pull(Q5)
+vic_05 <- vic_forecast %>% mutate(Q5 = quantile(Sales, 0.05)) %>% pull(Q5)
+nsw_05 <- nsw_forecast %>% mutate(Q5 = quantile(Sales, 0.05)) %>% pull(Q5)
+
+# Calculate DUR as (5% quantile / max 95% quantile) * 100
+wa_DUR <- (wa_05 / wa_max_95) * 100
+vic_DUR <- (vic_05 / vic_max_95) * 100
+nsw_DUR <- (nsw_05 / nsw_max_95) * 100
+
+
+# Calculate MDU (Mean Downside Utilization) for each state
+wa_MDU <- mean(wa_DUR, na.rm = TRUE)
+vic_MDU <- mean(vic_DUR, na.rm = TRUE)
+nsw_MDU <- mean(nsw_DUR, na.rm = TRUE)
+
+# Print MDU for each state
+print(paste("WA MDU:", wa_MDU))
+print(paste("VIC MDU:", vic_MDU))
+print(paste("NSW MDU:", nsw_MDU))
+
+```
+
+
+
+8. After examining your analysis in Question (7) management made two decisions: First, Building capacity up to the 95% quantile of demand was too considered too risky and affected expected profitability, and ask you to redefine the capacity at the 70% quantile as $ CAP = \max_h D_{h,0.70}$ and second, they decided that the downside risk at the 5% quantile was to conservative, and ask you to re-calculate the figures you reported using a downside demand estimated at the 10% quantile of the demand forecast and repeat your calculations in Question 7.  Comment on the likely effect of the capacity reduction decision on the capacity utilization at the median demand (i.e., $D_{h,0.50}$) Explain the difference with the utilization quantities estimated in Question (4)
+```{r}
+
+# Calculate the maximum 95% quantile for each forecast
+wa_max_70 <- max(wa_forecast %>% mutate(Q70 = quantile(Sales, 0.70)) %>% pull(Q70), na.rm = TRUE)
+vic_max_70 <- max(vic_forecast %>% mutate(Q70 = quantile(Sales, 0.70)) %>% pull(Q70), na.rm = TRUE)
+nsw_max_70 <- max(nsw_forecast %>% mutate(Q70 = quantile(Sales, 0.70)) %>% pull(Q70), na.rm = TRUE)
+
+# Calculate the 5% quantile for each forecast
+wa_10 <- wa_forecast %>% mutate(Q10 = quantile(Sales, 0.1)) %>% pull(Q10)
+vic_10 <- vic_forecast %>% mutate(Q10 = quantile(Sales, 0.1)) %>% pull(Q10)
+nsw_10 <- nsw_forecast %>% mutate(Q10 = quantile(Sales, 0.1)) %>% pull(Q10)
+
+# Calculate DUR as (10% quantile / max 70% quantile) * 100
+wa_DUR <- (wa_10 / wa_max_70) * 100
+vic_DUR <- (vic_10 / vic_max_70) * 100
+nsw_DUR <- (nsw_10 / nsw_max_70) * 100
+
+# Calculate MDU (Mean Downside Utilization) for each state
+wa_MDU <- mean(wa_DUR, na.rm = TRUE)
+vic_MDU <- mean(vic_DUR, na.rm = TRUE)
+nsw_MDU <- mean(nsw_DUR, na.rm = TRUE)
+
+# Print MDU for each state
+print(paste("WA MDU:", wa_MDU))
+print(paste("VIC MDU:", vic_MDU))
+print(paste("NSW MDU:", nsw_MDU))
+
+```
+
+Change in Capacity Planning Criteria:
+
+The shift from setting capacity based on the maximum demand level to the 70% quantile represents a significant change in strategy. This method tends to create a more conservative approach to capacity planning.
+By using the 70% quantile, it is essentially planning for a level of demand that's exceeded 30% of the time, which is expected to be more aligned with typical demand levels rather than peak levels.
+
+Impact on Utilization Rates:
+
+Intuitively, one might expect higher utilization rates when capacity is set lower (at the 70% quantile) because the capacity is closer to typical demand levels.
+However, the observed decrease in utilization rates indicates that the actual demand distribution might be more skewed than anticipated. It suggests that the typical (median) demand is substantially lower than the 70% quantile, leading to a capacity that exceeds regular needs.
+
+Risk Management Considerations:
+
+The decision to set capacity at a lower quantile indicates a risk-averse strategy. It minimizes the risk of underutilization and excessive investment in capacity that might not be frequently utilized. Conversely, this strategy might increase the risk of hitting capacity limits during peak demand periods, which could lead to lost opportunities or customer dissatisfaction. The downside risk assessment at the 10% quantile further indicates a focus on understanding and managing the potential for demand to fall well below expected levels.
+
+Implications
+Conservative Capacity Planning: The approach taken in question 7 suggests a shift towards more conservative capacity planning, possibly in response to historical patterns of demand or market volatility.
+Balancing Efficiency and Risk: Lower utilization rates are a trade-off for a risk-averse strategy. While this approach may lead to underutilized resources at times, it also buffers against the risk of demand surpassing capacity.
+Strategic Fit: This approach may fit well with business models that prioritize reliability and stability over maximizing short-term revenue or those operating in markets with high demand volatility.
+

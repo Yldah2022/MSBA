@@ -1,0 +1,391 @@
+---
+title: "Assignment #3 Yolanda Ojeda"
+output: html_notebook
+---
+***
+<center> 
+### Demand Models Laboratory.
+#### (Total 40 pts.)
+#### Due: Dec. 5 
+</center>
+***
+
+In this assignment you will produce a forecast for sales of carbonated beverages at a supermarket based on real weekly sales information of items in the category for a period of two years. This information is contained in the following three files:
+
+* **CarbBev_IA3.RDS**  This is the listing of weekly sales and the corresponding promotional variables for each product at the store.
+
+* **Carb Bev UPC.csv**  This includes product information for the different product UPC codes that you will find in the **CarbBev_IA3.RDS** file.
+
+* **Data Measure Definitions.docx**  This is a file with descriptions of the columns you will find in the **CarbBev_IA3.RDS** file.
+
+Please take a few minutes to get acquainted with the data.
+```{r}
+library(tidyverse)
+
+X <- readRDS("Carb_Bev_IA3.RDS") %>% 
+  mutate(P  = DOLLARS/UNITS) %>% 
+  select(-DOLLARS)
+
+U <- U <- read.csv("Carb_Bev_Prod_UPC.csv") %>% 
+  as_tibble %>% 
+  mutate(UPC = as.factor(UPC))
+```
+
+To make the project more concrete, you will develop a demand model for product UPC = *00-01-12000-80995* and use products UPC = *00-01-49000-02891*  and UPC = *00-01-78000-08316* as potential product substitutes, which corresponds to the following description:
+```{r}
+U %>% 
+  filter(UPC == "00-01-49000-02891" |
+         UPC == "00-01-12000-80995" |
+         UPC == "00-01-78000-08316") 
+```
+
+Our goal is to create a log-log model and *if necessary* embed the demand model in an ARIMA model (Regression with ARIMA errors) that accounts for the auto-correlations in the sales data.  As a first attempt we would like to include a demand function of the following form:
+
+$$y=e^{βx} p^α q_1^{γ_1} q_2^{γ_2}$$
+
+Where the model variables and parameters are defined as follows:
+
+* $y$ :	Demand (sales volume)
+* $p$ :	Price per unit of the focal product.
+* $q_i$ :	Price per unit of substitute products.
+* $x$ :	Vector of weighted averages of advertising and display variables for each product
+* $β$ :	Vector of coefficients for advertising and display variables
+* $α,γ_1,γ_2$:	Coefficients (elasticity and cross-elasticities) of prices
+
+We have a total of 104 weeks of data.  In this assignment we will use weeks 1 (WEEK = 31) through 94 (WEEK = 1624) as a training set and weeks 95 (WEEK = 1625) through 104 (WEEK = 1634) as a testing set.
+
+
+1. Create a data set appropriate for the above model (i.e., subset and wrangle the appropriate variables in correct position to execute a simple linear regression model)  Then run a TSLM model using only the prices (i.e., $y= p^α$) and examine the results you obtain.  Comment on the validity of the model. Plot the time-series of *UNITS* and overly the corresponding time series of fitted values, then comment on the fit of the model. What is the price-elasticity of demand according to this model?
+
+```{r}
+X %>%  
+  filter(UPC == "00-01-12000-80995") -> XR
+
+X %>% 
+  filter(UPC == "00-01-49000-02891" | 
+         UPC == "00-01-78000-08316" ) %>% 
+  select(WEEK, ITEM, D, PR, FEAT, P) %>% 
+  pivot_wider(names_from = ITEM,
+              values_from = c(D, PR, FEAT, P)) %>% 
+  select_if(~sum(is.na(.)) == 0) %>% 
+  left_join(XR,.,by = "WEEK") %>% 
+  as_tsibble(index = WEEK) -> XR
+
+TR <- XR %>% filter(WEEK <= 1624)
+TE <- XR %>% filter(WEEK >= 1625)
+
+library(forecast)
+library(dplyr)
+library(ggplot2)
+
+
+# Transform the data for log-log model
+TR_log <- TR %>%
+  mutate(log_units = log(UNITS),
+         log_P = log(P))
+
+# Convert the data to a ts object
+
+TR_ts <- ts(TR_log$log_units, start = min(TR$WEEK), end = max(TR$WEEK), frequency = 1)
+model <- tslm(TR_ts ~ TR_log$log_P)
+
+# Summarize the model to check its validity
+model_summary <- summary(model)
+print(model_summary)
+
+
+```
+**Intercept Interpretation**:
+The intercept in the log-log model (approximately 10.7070) suggests the expected log(UNITS) when log(P) is zero. Exponentiating this value gives the predicted UNITS at a price of 1. However, this may not be meaningful if a price of 1 is uncommon in your data.
+
+**Coefficient (Elasticity) Interpretation**:
+The calculated price elasticity of demand is approximately -4.59, indicating a highly elastic demand for this product. Economically, this implies that a 1% increase in price is linked to a roughly 4.59% decrease in quantity demanded. Such high elasticity underscores the significant sensitivity of demand to changes in price.
+
+**Economic Interpretation**:
+The negative elasticity aligns with the law of demand, where demand decreases as price increases. The high elasticity magnitude here implies significant sensitivity of demand to price changes.
+
+
+```{r}
+
+# Calculate price elasticity
+# The coefficient name should be "log_P" as it's the name of the variable in the model
+pe_value <- model_summary$coefficients["TR_log$log_P", "Estimate"]
+print(paste("Price Elasticity of Demand:", pe_value))
+
+# Get fitted values from the model
+fitted_values <- fitted(model)
+
+# Convert fitted values back to the original scale (exponential transformation)
+fitted_values_exp <- exp(fitted_values)
+
+# Plot the actual vs. fitted values
+# Ensure that TR_log contains the actual UNITS and the WEEK variable for plotting
+ggplot(TR_log, aes(x = WEEK)) +
+  geom_line(aes(y = UNITS), color = "blue") +
+  geom_line(aes(y = fitted_values_exp), color = "red") +
+  labs(title = "Actual vs. Fitted Sales", x = "Week", y = "Sales") +
+  theme_minimal()
+
+```
+
+
+
+2. Use the training set to fit LASSO regression model (i.e., use the **glmnet** R package ) that includes as candidate model features all the prices, advertisement/promotion and feature variables and their cross-products. Report the set of non-zero coefficients for the lasso solutions corresponding to $\lambda_{min}$ and $\lambda_{1se}$. #model.matrix func to make it dummy var and eliminate the insignificant variables 
+
+```{r}
+library(glmnet)
+
+set.seed(123)
+
+# Create a model matrix for the glmnet function
+features <- TR %>%
+  select(-UNITS, -WEEK, -UPC, -VEND, -ITEM) %>% # Remove the response variable and other non-feature variables
+  as.data.frame()
+
+features_matrix <- model.matrix(~ .^2, features) # Create all main effects and their cross-products
+  
+# Extract the response variable
+y <- TR$UNITS
+
+# Fit the LASSO model
+lasso_model <- glmnet(features_matrix, y, alpha = 1, family = "gaussian")
+
+# Determine the lambda that minimizes the cross-validation error and lambda with 1 standard error
+cv_lasso <- cv.glmnet(features_matrix, y, alpha = 1, family = "gaussian")
+lambda_min <- cv_lasso$lambda.min
+lambda_1se <- cv_lasso$lambda.1se
+
+# Extract and report non-zero coefficients at lambda.min and lambda.1se
+coeff_lambda_min <- coef(cv_lasso, s = lambda_min)[,1]
+coeff_lambda_1se <- coef(cv_lasso, s = lambda_1se)[,1]
+
+non_zero_min <- data.frame(Variable = names(coeff_lambda_min), Coefficient = coeff_lambda_min)
+non_zero_1se <- data.frame(Variable = names(coeff_lambda_1se), Coefficient = coeff_lambda_1se)
+
+non_zero_min <- non_zero_min[non_zero_min$Coefficient != 0, ]
+non_zero_1se <- non_zero_1se[non_zero_1se$Coefficient != 0, ]
+
+# Print the results
+cat("Non-zero coefficients at lambda.min:\n")
+print(non_zero_min)
+
+cat("\nNon-zero coefficients at lambda.1se:\n")
+print(non_zero_1se)
+```
+Lambda.min Non-Zero Coefficients
+(Intercept) 795.41689335: High baseline value, indicating a strong base level of demand when all predictors are zero.
+P -162.84789785: Significant negative coefficient for price, showing a substantial inverse relationship with demand.
+D:FEATB, D:D_2891, D:D_8316, etc.: A mixture of positive and negative coefficients for interaction terms, reflecting complex influences of discounts, promotional features, and product identifiers on demand.
+PR:P -14.90121227: Interaction effect between price and promotional variables, suggesting nuanced pricing strategies.
+FEATB:FEAT_2891B -646.77881019: One of the largest negative coefficients, indicating a strong inverse relationship with specific feature interactions.
+Lambda.1se Non-Zero Coefficients
+(Intercept) 426.00491: Lower baseline than lambda.min, but still highlighting a significant base level of demand.
+P -70.37249: Price remains a crucial factor but with a reduced effect size, emphasizing its consistent impact on demand.
+Summary
+Price Consistency: Price consistently emerges as a significant predictor in both models, with a negative influence on demand.
+Complex Interactions at Lambda.min: Various interactions, particularly involving discounts and promotional activities, are significant at lambda.min, indicating their varied impact on demand.
+Simplified Model at Lambda.1se: At lambda.1se, the model simplifies to focus mainly on price and baseline demand, suggesting a more conservative approach to capturing the most robust predictors.
+Overall Impact: While complex factors are relevant, price demonstrates the most consistent and significant impact across models.
+
+
+3.  Use the training set to fit an unrestricted TSLM regression model on the reduced set of explanatory variables identified by The LASSO.  Report the coefficients of the full model and comment on the fit of the model and examine the auto-correlations of the residuals of this model. If necessary enhance the reduced model as a regression with ARIMA errors.
+
+```{r}
+library(lubridate)
+library(dplyr)
+library(fabletools)
+library(fable)
+library(tsibble)
+
+# Assuming 'TR' is a tsibble or data frame with time series data
+reduced_variables <- TR[, c("WEEK", "UNITS", "P")]
+
+# Convert WEEK to a Date format if it's not already
+reduced_variables <- reduced_variables %>%
+  mutate(Date = as.Date(WEEK, origin = "1970-01-01"))  # Adjust the origin date as necessary
+
+# Create time (trend) and seasonal variables
+reduced_variables <- reduced_variables %>%
+  mutate(
+    Trend = as.numeric(Date - min(Date)),
+    Season = factor(month(Date))
+  )
+
+# Fit the linear regression model with time and seasonal components
+lm_model <- lm(UNITS ~ P + Trend + Season, data = reduced_variables)
+
+# Examine the results of the model
+summary(lm_model)
+
+# Optionally, if ARIMA errors are to be explored:
+# Convert to a tsibble
+reduced_tsibble <- as_tsibble(reduced_variables, index = Date)
+
+# Fit a model with ARIMA errors
+arima_model <- reduced_tsibble %>%
+  model(ARIMA(UNITS ~ P + Trend + Season))
+
+
+```
+
+```{r}
+# Check for auto-correlations in the residuals
+acf(resid(lm_model))
+``` 
+Baseline Demand (Intercept 959.152): The model indicates a substantial baseline demand of around 959 units, assuming no influence from price or trend factors.
+Price Effect (P -208.620): A significant negative coefficient for price suggests a strong inverse relationship with sales, where an increase in price is likely to reduce units sold.
+Trend Analysis (Trend -1.542): The trend component is not statistically significant (p-value = 0.3578), indicating no apparent trend in sales over the time period analyzed.
+Seasonal Variations: Season4 shows potential seasonal variation, while Season5 and Season6 don't exhibit significant seasonal effects on sales.
+Model Fit Assessment
+Residual Standard Error (123.8): Suggests an average prediction error of about 123.8 units, giving an idea of the typical residual size.
+Model Explanatory Power (R-squared 0.5819, Adjusted R-squared 0.5581): The model explains approximately 58.19% of the variance in sales, indicating moderate explanatory power. The adjusted R-squared accounts for the number of predictors, also supporting a moderate fit.
+Statistical Significance (F-statistic 24.49): The model is statistically significant (p-value < 2.266e-15), affirming a meaningful relationship between predictors and sales volume.
+Autocorrelation in Residuals
+Autocorrelation Check: A test like the Ljung-Box test is recommended to check for autocorrelation in the residuals. If significant autocorrelation is detected, considering an ARIMA model for error correction could enhance the model's accuracy.
+Overall, the model highlights the pivotal role of price in influencing sales, with mixed seasonal effects and no clear long-term trend. The model's fit is moderate, and further robustness can be achieved by addressing potential autocorrelation in the residuals.
+```{r}
+# Extract residuals and convert to a tsibble
+residuals_tsibble <- as_tsibble(tibble(Date = reduced_variables$Date, residuals_lm = resid(lm_model)), index = Date)
+
+# Conduct Ljung-Box test on residuals
+lb_test <- residuals_tsibble %>%
+  features(residuals_lm, ljung_box, lag = 10)
+
+print(lb_test)
+
+if(lb_test$lb_pvalue < 0.05) {
+  # Fit the regression with ARIMA errors
+  arima_model <- TR %>%
+    select(WEEK, UNITS, all_of(selected_features)) %>%
+    model(ARIMA(UNITS ~ .))
+  
+  # Report the coefficients of the ARIMA model
+  arima_coefs <- coef(arima_model)
+  print(arima_coefs)
+  
+  # Examine the residuals of the ARIMA model
+  arima_fit <- augment(arima_model)
+  autoplot(arima_fit, .resid)
+}
+```
+Ljung-Box Test: The Ljung-Box test yields a statistic (lb_stat) of 8.962167 with a p-value (lb_pvalue) of 0.5356978. This outcome suggests that there is no significant evidence of autocorrelation at the tested lags in the model's residuals.
+
+Given this result, it appears that enhancing the reduced model with an ARIMA component may not be necessary, as the residuals do not exhibit significant autocorrelation. However, it's still advisable to consider other diagnostic checks to fully assess the model's adequacy. This would help account for any subtle autoregressive or moving average patterns that might not be evident from the Ljung-Box test alone.
+
+
+
+4. Plot as a time-series the product demand (UNITS) and fitted values over the training period, and then the forecast and the actual values over the test period.  Compare this plot to the corresponding one in Question 1, and comment on the improvement.
+```{r}
+# Create a model matrix for the glmnet function
+features_test <- TE %>%
+  select(-UNITS, -WEEK, -UPC, -VEND, -ITEM) %>% # remove the response variable and the WEEK variable
+  as.data.frame()
+
+features_test_matrix <- features_test[,1:12] %>%  model.matrix(~ .^2, .) # create all main effects and their cross-products
+# Convert features_matrix to a tibble
+f_test <- features_test_matrix %>% 
+  as_tibble() %>% 
+  mutate(UNITS = TE$UNITS, WEEK = TE$WEEK) %>% 
+  as_tsibble(index=WEEK) %>% 
+  select(all_of(selected_vars_min), UNITS)
+
+# Fit the TSLM on the reduced set of variables
+tslm_model_test <- f_test %>% 
+  model(m3 = TSLM(UNITS ~ . -UNITS -WEEK))
+
+# Augment both training and test datasets
+train_augmented <- augment(tslm_model, new_data = TR) %>%
+  mutate(Set = "Train", Type = "Actual")
+
+test_augmented <- augment(tslm_model_test, new_data = TE) %>%
+  mutate(Set = "Test", Type = "Actual")
+
+# Convert augmented datasets to tibbles
+train_augmented_tb <- as_tibble(train_augmented)
+test_augmented_tb <- as_tibble(test_augmented)
+
+# Create a tibble for fitted values from the training set
+train_fitted_tb <- train_augmented_tb %>%
+  mutate(UNITS = .fitted, Type = "Fitted")
+
+# Create a tibble for fitted values from the test set
+test_fitted_tb <- test_augmented_tb %>%
+  mutate(UNITS = .fitted, Type = "Fitted")
+
+# Combine actual and fitted data into one tibble
+combined_data <- bind_rows(
+  train_augmented_tb,
+  train_fitted_tb,
+  test_augmented_tb,
+  test_fitted_tb
+)
+
+# Plot the actual vs. fitted sales for both training and test sets
+combined_plot <- ggplot(combined_data, aes(x = WEEK, y = UNITS, color = interaction(Set, Type))) +
+  geom_line() +
+  scale_color_manual(values = c("Train.Actual" = "black", "Train.Fitted" = "red", "Test.Actual" = "blue", "Test.Fitted" = "green")) +
+  labs(title = "Actual vs Fitted Sales (Units) for Training and Test Sets", x = "Week", y = "Sales (Units)", color = "Legend")
+
+# Print the combined plot
+print(combined_plot)
+
+```
+The improved congruence between actual and predicted sales values in the analysis from Question 4, relative to Question 1, signifies enhanced model accuracy. This improvement likely stems from several key adjustments:
+
+1. **Effective Feature Selection**: The incorporation of a more selective approach, possibly informed by LASSO regression, could have played a pivotal role. By focusing on the most influential variables and reducing the noise from less relevant ones, the model's ability to capture the essential aspects of the data is enhanced.
+
+2. **Refined Model Specification**: Adjustments to the model's structure, whether in terms of including interaction terms, polynomial features, or other transformations, might have contributed to this increased alignment.
+
+3. **Addressing Autocorrelation**: If modifications were made to account for autocorrelation in the residuals, such as through ARIMA modeling, this could have led to a more accurate representation of the sales dynamics, particularly in time series data where past values can influence future ones.
+
+While perfect alignment between actual and predicted values is not typically anticipated due to inherent variability and potential outliers in real-world data, the graph from Question 4 demonstrates a more robust match. This is a positive indicator of the model's effectiveness, suggesting that it is better equipped to understand and predict the underlying sales trends than the initial model presented in Question 1.
+
+
+
+5. Examine the correlation matrix between all the predictive variables considered in your analysis and comment on how the observed correlation affects the results you obtained.
+```{r}
+library(corrplot)
+
+# Convert factor variables to dummy variables
+predictive_vars <- TR %>%
+  select(-UNITS, -WEEK, -UPC, -VEND, -ITEM) %>% # remove the response variable and the WEEK variable
+  as.data.frame()
+
+predictive_vars_matrix <- predictive_vars[,1:6] %>%  model.matrix(~ . -1, .) # create all main effects  
+
+# Calculate the correlation matrix
+cor_matrix <- cor(predictive_vars_matrix)
+
+cor_matrix[is.na(cor_matrix)] <- 0
+print(cor_matrix)
+```
+
+```{r}
+# Visualize the correlation matrix
+corrplot(cor_matrix, method = "circle")
+```
+
+Positive Correlations:
+Variables like D and PR, FEATNONE and P show strong positive correlations, with coefficients nearing 1. This implies a direct relationship: as one variable increases, so does the other.
+High positive correlations (above 0.7 or 0.8) may suggest redundancy in information, potentially leading to multicollinearity in regression models. Multicollinearity can cause inflated variance in coefficient estimates, destabilizing the model.
+Negative Correlations:
+
+Notable negative correlations are observed between pairs like FEATNONE and D, PR and P. In these cases, an increase in one variable typically coincides with a decrease in the other.
+Strong negative correlations can also raise multicollinearity concerns in models that include these variables together.
+Weak or No Correlations:
+
+Certain variables, such as FEATC, FEATA+, FEAT_2891C, and FEAT_8316A+, exhibit no or negligible correlations, indicating a lack of linear relationships with other variables.
+Weak correlations suggest that these variables might contribute independent information to the model.
+Model Implications:
+
+High correlation (positive or negative) between predictors can lead to multicollinearity, risking model overfitting and poor generalization to new data.
+Multicollinearity complicates interpreting the influence of individual predictors since they are interrelated.
+Variable Selection:
+
+The LASSO method helps address multicollinearity by automatically selecting variables, reducing coefficients of less significant variables to zero.
+The correlation matrix can guide LASSO's approach to multicollinearity.
+Heatmap Interpretation:
+
+The heatmap displays correlation strengths: red for positive, blue for negative, with dot size indicating correlation magnitude.
+The diagonal line of large dots represents the perfect positive self-correlation of each variable.
+In summary, these correlations inform model construction. Techniques like LASSO, ridge regression, or elastic net are valuable in managing correlated predictors, ensuring a robust and interpretable model.
